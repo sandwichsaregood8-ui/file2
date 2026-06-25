@@ -1,0 +1,6 @@
+{
+  "name": "Interactive Drag and Drop Canvas",
+  "description": "A minimalist, responsive drag-and-drop board for adding and moving images, GIFs, and text elements across multiple screens, protected by a simple password.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
