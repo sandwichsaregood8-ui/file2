@@ -14,7 +14,8 @@ import {
   Move, 
   RotateCcw,
   Info,
-  Maximize2
+  Maximize2,
+  Share2
 } from 'lucide-react';
 
 interface CanvasElement {
@@ -30,48 +31,36 @@ interface CanvasElement {
   zIndex: number;
 }
 
+// =========================================================================
+// 🎂 BIRTHDAY CARD CONFIGURATION FOR RECIPIENT
+// =========================================================================
+// Fill your board with photos, GIFs, and beautiful text first.
+// When you're ready to share it as a permanent card:
+// 1. Click the "Export Card Code" button in the corner to copy the layout.
+// 2. Paste that copied code directly into the PRESET_ELEMENTS array below.
+// 3. Flip IS_READ_ONLY to true and BYPASS_PASSWORD to true if you want the card
+//    to immediately show up without requiring the "sky" passcode.
+// 4. Push/deploy your changes to GitHub Pages!
+const CARD_CONFIG = {
+  IS_READ_ONLY: false,         // Hides editing buttons (+, T, delete, clear, and lock)
+  BYPASS_PASSWORD: false,      // Directly opens the card, skipping the "sky" password screen
+  ALLOW_RECIPIENT_DRAG: true,   // Let the recipient slide images & text around for fun
+  PRESET_ELEMENTS: [] as CanvasElement[] // Paste exported JSON array here!
+};
+
 export default function InteractiveCanvas() {
   // Passcode state
-  const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('skysnap_unlocked') === 'true';
-    }
-    return false;
-  });
+  const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
   const [passcode, setPasscode] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
   const hasLoadedRef = useRef<boolean>(false);
 
   // App state
   const [currentScreen, setCurrentScreen] = useState<1 | 2>(1);
-  const [elements, setElements] = useState<CanvasElement[]>(() => {
-    if (typeof window !== 'undefined') {
-      const savedElements = localStorage.getItem('skysnap_canvas_elements');
-      if (savedElements) {
-        try {
-          return JSON.parse(savedElements) as CanvasElement[];
-        } catch (e) {
-          console.error('Failed to parse saved canvas elements', e);
-        }
-      }
-    }
-    return [];
-  });
+  const [elements, setElements] = useState<CanvasElement[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [nextZIndex, setNextZIndex] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const savedElements = localStorage.getItem('skysnap_canvas_elements');
-      if (savedElements) {
-        try {
-          const parsed = JSON.parse(savedElements) as CanvasElement[];
-          const maxZ = parsed.reduce((max, el) => Math.max(max, el.zIndex), 0);
-          return maxZ + 1;
-        } catch (e) {}
-      }
-    }
-    return 1;
-  });
+  const [nextZIndex, setNextZIndex] = useState<number>(1);
   const [showHelp, setShowHelp] = useState<boolean>(true);
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -81,14 +70,40 @@ export default function InteractiveCanvas() {
   // Correct passcode (kept simple and minimalist)
   const CORRECT_PASSCODE = 'sky';
 
-  // Mark loading complete on mount
+  // Mark loading complete and read from localStorage or presets on mount
   useEffect(() => {
-    hasLoadedRef.current = true;
+    const savedUnlock = localStorage.getItem('skysnap_unlocked');
+    const savedElements = localStorage.getItem('skysnap_canvas_elements');
+
+    const frameId = requestAnimationFrame(() => {
+      if (savedUnlock === 'true' || CARD_CONFIG.BYPASS_PASSWORD) {
+        setIsUnlocked(true);
+      }
+
+      if (CARD_CONFIG.PRESET_ELEMENTS && CARD_CONFIG.PRESET_ELEMENTS.length > 0) {
+        setElements(CARD_CONFIG.PRESET_ELEMENTS);
+        const maxZ = CARD_CONFIG.PRESET_ELEMENTS.reduce((max, el) => Math.max(max, el.zIndex), 0);
+        setNextZIndex(maxZ + 1);
+      } else if (savedElements) {
+        try {
+          const parsed = JSON.parse(savedElements) as CanvasElement[];
+          setElements(parsed);
+          const maxZ = parsed.reduce((max, el) => Math.max(max, el.zIndex), 0);
+          setNextZIndex(maxZ + 1);
+        } catch (e) {
+          console.error('Failed to parse saved canvas elements', e);
+        }
+      }
+      
+      hasLoadedRef.current = true;
+    });
+
+    return () => cancelAnimationFrame(frameId);
   }, []);
 
-  // Save elements to local storage on change
+  // Save elements to local storage on change (only if not read-only card)
   useEffect(() => {
-    if (hasLoadedRef.current && isUnlocked) {
+    if (hasLoadedRef.current && isUnlocked && !CARD_CONFIG.IS_READ_ONLY) {
       localStorage.setItem('skysnap_canvas_elements', JSON.stringify(elements));
     }
   }, [elements, isUnlocked]);
@@ -294,6 +309,10 @@ export default function InteractiveCanvas() {
 
   // Unified Pointer Event Drag Handler
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, elementId: string) => {
+    if (CARD_CONFIG.IS_READ_ONLY && !CARD_CONFIG.ALLOW_RECIPIENT_DRAG) {
+      return;
+    }
+
     // Do not drag if clicking on a button, textarea, or resize handle
     const target = e.target as HTMLElement;
     if (target.closest('.no-drag') || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') {
@@ -346,6 +365,7 @@ export default function InteractiveCanvas() {
 
   // Drag handler for resizing elements
   const handleResizePointerDown = (e: React.PointerEvent<HTMLDivElement>, elementId: string) => {
+    if (CARD_CONFIG.IS_READ_ONLY) return;
     e.stopPropagation();
     e.preventDefault();
 
@@ -409,7 +429,7 @@ export default function InteractiveCanvas() {
   return (
     <main className="relative min-h-screen w-full select-none overflow-hidden bg-black text-white font-sans" id="canvas-app">
       <AnimatePresence mode="wait">
-        {!isUnlocked ? (
+        {!isUnlocked && !CARD_CONFIG.BYPASS_PASSWORD ? (
           // --- LANDING PASSWORD SCREEN ---
           <motion.div
             key="lock-screen"
@@ -489,52 +509,54 @@ export default function InteractiveCanvas() {
             />
 
             {/* --- TOP TOOLBAR --- */}
-            <div className="pointer-events-none absolute top-8 left-0 right-0 z-50 flex justify-center px-4" id="top-toolbar-wrapper">
-              <div 
-                className="pointer-events-auto flex items-center gap-4"
-                id="top-toolbar"
-              >
-                {/* Add Image Button */}
-                <button
-                  onClick={triggerFileInput}
-                  className="flex h-[45px] w-[45px] items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:border-white transition-all cursor-pointer hover:bg-white hover:text-black"
-                  title="Add Image or GIF"
-                  id="btn-add-image"
+            {!CARD_CONFIG.IS_READ_ONLY && (
+              <div className="pointer-events-none absolute top-8 left-0 right-0 z-50 flex justify-center px-4" id="top-toolbar-wrapper">
+                <div 
+                  className="pointer-events-auto flex items-center gap-4"
+                  id="top-toolbar"
                 >
-                  <Plus className="h-5 w-5" />
-                </button>
+                  {/* Add Image Button */}
+                  <button
+                    onClick={triggerFileInput}
+                    className="flex h-[45px] w-[45px] items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:border-white transition-all cursor-pointer hover:bg-white hover:text-black"
+                    title="Add Image or GIF"
+                    id="btn-add-image"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
 
-                {/* Add Text Button */}
-                <button
-                  onClick={handleAddText}
-                  className="flex h-[45px] w-[45px] items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:border-white transition-all cursor-pointer font-sans font-medium text-lg hover:bg-white hover:text-black"
-                  title="Add Text Block"
-                  id="btn-add-text"
-                >
-                  T
-                </button>
+                  {/* Add Text Button */}
+                  <button
+                    onClick={handleAddText}
+                    className="flex h-[45px] w-[45px] items-center justify-center rounded-full border border-white/30 bg-black/50 text-white hover:border-white transition-all cursor-pointer font-sans font-medium text-lg hover:bg-white hover:text-black"
+                    title="Add Text Block"
+                    id="btn-add-text"
+                  >
+                    T
+                  </button>
 
-                {/* Clear Active Screen Board */}
-                <button
-                  onClick={handleClearScreen}
-                  className="flex h-[45px] w-[45px] items-center justify-center rounded-full border border-white/30 bg-black/50 text-zinc-400 hover:border-red-500 hover:text-red-400 transition-all cursor-pointer hover:bg-red-950/20"
-                  title="Clear Current Board"
-                  id="btn-clear-board"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                  {/* Clear Active Screen Board */}
+                  <button
+                    onClick={handleClearScreen}
+                    className="flex h-[45px] w-[45px] items-center justify-center rounded-full border border-white/30 bg-black/50 text-zinc-400 hover:border-red-500 hover:text-red-400 transition-all cursor-pointer hover:bg-red-950/20"
+                    title="Clear Current Board"
+                    id="btn-clear-board"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
 
-                {/* Log Out Lock Button */}
-                <button
-                  onClick={handleLogout}
-                  className="flex h-[45px] w-[45px] items-center justify-center rounded-full border border-white/30 bg-black/50 text-zinc-400 hover:border-white hover:text-white transition-all cursor-pointer hover:bg-zinc-900"
-                  title="Lock Canvas"
-                  id="btn-lock-canvas"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                  {/* Log Out Lock Button */}
+                  <button
+                    onClick={handleLogout}
+                    className="flex h-[45px] w-[45px] items-center justify-center rounded-full border border-white/30 bg-black/50 text-zinc-400 hover:border-white hover:text-white transition-all cursor-pointer hover:bg-zinc-900"
+                    title="Lock Canvas"
+                    id="btn-lock-canvas"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Hidden File Input */}
             <input
@@ -546,6 +568,43 @@ export default function InteractiveCanvas() {
               className="hidden"
               id="hidden-file-input"
             />
+
+            {/* Export Layout Code Button (Only when not read-only config) */}
+            {!CARD_CONFIG.IS_READ_ONLY && (
+              <div className="absolute top-8 right-8 z-50 pointer-events-auto" id="export-layout-wrapper">
+                <button
+                  onClick={() => {
+                    const cleanElements = elements.map(el => ({
+                      id: el.id,
+                      type: el.type,
+                      content: el.content,
+                      x: parseFloat(el.x.toFixed(2)),
+                      y: parseFloat(el.y.toFixed(2)),
+                      width: Math.round(el.width),
+                      height: Math.round(el.height),
+                      fontSize: Math.round(el.fontSize),
+                      screen: el.screen,
+                      zIndex: el.zIndex
+                    }));
+                    const codeString = JSON.stringify(cleanElements, null, 2);
+                    navigator.clipboard.writeText(codeString)
+                      .then(() => {
+                        alert("🎂 Layout configuration copied to clipboard! Paste it inside CARD_CONFIG.PRESET_ELEMENTS array at the top of page.tsx, then set IS_READ_ONLY to true!");
+                      })
+                      .catch(err => {
+                        console.error("Failed to copy layout config", err);
+                        alert("Could not copy automatically. Here is the code:\n\n" + codeString);
+                      });
+                  }}
+                  className="flex items-center gap-2 border border-white/30 bg-black/50 text-white px-4 py-2.5 rounded-full hover:border-white hover:bg-white hover:text-black transition-all cursor-pointer font-sans text-xs uppercase tracking-wider"
+                  title="Export card configuration for sharing"
+                  id="btn-export-layout"
+                >
+                  <Share2 className="h-4 w-4" />
+                  <span>Export Card Code</span>
+                </button>
+              </div>
+            )}
 
             {/* --- CORE WORKING CANVAS --- */}
             <div
@@ -607,7 +666,7 @@ export default function InteractiveCanvas() {
                           id={`element-${el.id}`}
                         >
                           {/* Element Actions Bar (shows when selected or hovered) */}
-                          {isSelected && (
+                          {isSelected && !CARD_CONFIG.IS_READ_ONLY && (
                             <div className="no-drag absolute -top-10 right-0 z-50 flex items-center gap-1.5 rounded-full border border-white/20 bg-black px-2.5 py-1 shadow-lg pointer-events-auto" id={`actions-${el.id}`}>
                               {el.type === 'text' && (
                                 <button
@@ -655,6 +714,7 @@ export default function InteractiveCanvas() {
                                 height: '100%',
                               }}
                               onDoubleClick={() => {
+                                if (CARD_CONFIG.IS_READ_ONLY) return;
                                 setSelectedId(el.id);
                                 setEditingId(el.id);
                               }}
@@ -683,14 +743,14 @@ export default function InteractiveCanvas() {
                                   className="w-full h-full text-center whitespace-pre-wrap select-none break-words font-sans font-light tracking-wide"
                                   style={{ fontSize: `${el.fontSize}px`, lineHeight: 1.2 }}
                                 >
-                                  {el.content || 'Click to edit'}
+                                  {el.content || (CARD_CONFIG.IS_READ_ONLY ? '' : 'Click to edit')}
                                 </p>
                               )}
                             </div>
                           )}
 
-                          {/* Draggable Indicator Corner Icons (only when selected) */}
-                          {isSelected && (
+                          {/* Draggable Indicator Corner Icons (only when selected and not read-only) */}
+                          {isSelected && !CARD_CONFIG.IS_READ_ONLY && (
                             <>
                               {/* Drag/Move indicator in top left */}
                               <div className="absolute -top-1.5 -left-1.5 h-3.5 w-3.5 rounded-full border border-white bg-black flex items-center justify-center text-[8px] text-white pointer-events-none" id={`drag-indicator-${el.id}`}>
@@ -751,11 +811,16 @@ export default function InteractiveCanvas() {
               )}
             </div>
 
-            {/* Subtle Instructions Banner (dissolves after adding items) */}
-            {elements.length > 0 && showHelp && (
+            {/* Subtle Instructions Banner */}
+            {elements.length > 0 && showHelp && (!CARD_CONFIG.IS_READ_ONLY || CARD_CONFIG.ALLOW_RECIPIENT_DRAG) && (
               <div className="absolute bottom-10 left-10 z-40 flex justify-start pointer-events-none animate-fade-in" id="instructions-container">
                 <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/60 px-4 py-2 text-[10px] text-zinc-500 font-sans tracking-wide uppercase shadow-xl">
-                  <span>✨ Tips: Drag to move • Bottom-right to resize • Double-click text to edit</span>
+                  <span>
+                    {CARD_CONFIG.IS_READ_ONLY 
+                      ? "✨ Tip: Drag items around to arrange them!"
+                      : "✨ Tips: Drag to move • Bottom-right to resize • Double-click text to edit"
+                    }
+                  </span>
                   <button 
                     onClick={() => setShowHelp(false)} 
                     className="pointer-events-auto text-zinc-400 hover:text-white ml-2 uppercase font-semibold text-[9px] tracking-wider"
